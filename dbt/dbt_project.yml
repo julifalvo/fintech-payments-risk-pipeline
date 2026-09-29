@@ -1,0 +1,37 @@
+name: payments
+version: "1.0.0"
+profile: payments
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  high_amount_usd: 1000
+  velocity_txn_threshold: 5
+  new_account_days: 30
+  risk_alert_threshold: 50
+  incremental_lookback_days: 3
+
+models:
+  payments:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts
+
+seeds:
+  payments:
+    +schema: reference
+    fx_rates:
+      +column_types:
+        currency: varchar
+        usd_per_unit: decimal(18, 8)

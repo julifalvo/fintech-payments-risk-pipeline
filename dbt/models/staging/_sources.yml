@@ -1,0 +1,26 @@
+sources:
+  - name: landing
+    description: Raw Parquet files landed by the ingestion layer (bronze).
+    tables:
+      - name: customers
+        meta:
+          external_location: "read_parquet('{{ env_var('LANDING_DIR', '../data/landing') }}/customers/data.parquet')"
+          dagster:
+            asset_key: ["raw_customers"]
+      - name: merchants
+        meta:
+          external_location: "read_parquet('{{ env_var('LANDING_DIR', '../data/landing') }}/merchants/data.parquet')"
+          dagster:
+            asset_key: ["raw_merchants"]
+      - name: transactions
+        description: Card transactions, one Hive partition per business day (dt).
+        meta:
+          external_location: "read_parquet('{{ env_var('LANDING_DIR', '../data/landing') }}/transactions/*/data.parquet', hive_partitioning = true)"
+          dagster:
+            asset_key: ["raw_transactions"]
+      - name: chargebacks
+        description: Disputes raised by issuers against approved transactions.
+        meta:
+          external_location: "read_parquet('{{ env_var('LANDING_DIR', '../data/landing') }}/chargebacks/*/data.parquet', hive_partitioning = true)"
+          dagster:
+            asset_key: ["raw_chargebacks"]

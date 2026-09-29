@@ -1,0 +1,11 @@
+seeds:
+  - name: fx_rates
+    description: Static FX table used to normalize amounts to USD. Replace with a daily FX feed in production.
+    columns:
+      - name: currency
+        data_tests:
+          - unique
+          - not_null
+      - name: usd_per_unit
+        data_tests:
+          - not_null
