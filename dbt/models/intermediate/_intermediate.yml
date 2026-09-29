@@ -1,0 +1,65 @@
+models:
+  - name: int_transactions__enriched
+    description: Transactions joined to customer, merchant and FX reference data, normalized to USD.
+    columns:
+      - name: transaction_id
+        data_tests: [unique, not_null]
+      - name: amount_usd
+        data_tests: [not_null]
+
+  - name: int_transactions__velocity
+    description: Per-customer rolling activity features (1h count, 24h USD volume).
+    columns:
+      - name: customer_txn_count_1h
+        data_tests:
+          - value_between:
+              arguments:
+                min_value: 1
+                max_value: 1000
+
+  - name: int_transactions__scored
+    description: >
+      Rule-based fraud risk score (0-100). Weights: high amount 35, velocity 30,
+      cross-border 15, new account 10, high-risk merchant 10. Thresholds live in dbt vars.
+    columns:
+      - name: risk_score
+        data_tests:
+          - not_null
+          - value_between:
+              arguments:
+                min_value: 0
+                max_value: 100
+      - name: risk_level
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [low, medium, high]
+
+unit_tests:
+  - name: risk_score_combines_rule_weights
+    description: Each flag contributes its weight and the level follows the thresholds.
+    model: int_transactions__scored
+    given:
+      - input: ref('int_transactions__velocity')
+        rows:
+          - {transaction_id: clean, amount_usd: 50, customer_txn_count_1h: 1, is_cross_border: false, account_age_days: 400, merchant_risk_tier: low}
+          - {transaction_id: big_foreign, amount_usd: 2500, customer_txn_count_1h: 1, is_cross_border: true, account_age_days: 400, merchant_risk_tier: low}
+          - {transaction_id: burst, amount_usd: 120, customer_txn_count_1h: 7, is_cross_border: true, account_age_days: 10, merchant_risk_tier: high}
+          - {transaction_id: all_flags, amount_usd: 4000, customer_txn_count_1h: 9, is_cross_border: true, account_age_days: 2, merchant_risk_tier: high}
+    expect:
+      rows:
+        - {transaction_id: clean, risk_score: 0, risk_level: low, risk_reasons: ""}
+        - {transaction_id: big_foreign, risk_score: 50, risk_level: medium, risk_reasons: "high_amount, cross_border"}
+        - {transaction_id: burst, risk_score: 65, risk_level: medium, risk_reasons: "velocity, cross_border, new_account, high_risk_merchant"}
+        - {transaction_id: all_flags, risk_score: 100, risk_level: high, risk_reasons: "high_amount, velocity, cross_border, new_account, high_risk_merchant"}
+
+  - name: missing_reference_data_does_not_null_the_score
+    description: Unknown customer or merchant must yield a score, not NULL.
+    model: int_transactions__scored
+    given:
+      - input: ref('int_transactions__velocity')
+        rows:
+          - {transaction_id: orphan, amount_usd: 10, customer_txn_count_1h: 1, is_cross_border: null, account_age_days: null, merchant_risk_tier: null}
+    expect:
+      rows:
+        - {transaction_id: orphan, risk_score: 0, risk_level: low}
