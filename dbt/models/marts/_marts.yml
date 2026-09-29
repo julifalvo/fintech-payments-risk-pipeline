@@ -1,0 +1,237 @@
+models:
+  - name: fct_transactions
+    description: >
+      One row per card transaction with USD amount, velocity features and fraud risk score.
+      Incremental (delete+insert) with a configurable lookback to absorb late-arriving data.
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: transaction_id
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - name: transaction_date
+        data_type: date
+        constraints: [{type: not_null}]
+      - name: transaction_at
+        data_type: timestamp
+      - name: customer_id
+        data_type: varchar
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_customers')
+                field: customer_id
+      - name: merchant_id
+        data_type: varchar
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_merchants')
+                field: merchant_id
+      - name: amount
+        data_type: decimal(18,2)
+      - name: currency
+        data_type: varchar
+      - name: amount_usd
+        data_type: decimal(18,2)
+        constraints: [{type: not_null}]
+      - name: channel
+        data_type: varchar
+      - name: card_present
+        data_type: boolean
+      - name: ip_country
+        data_type: varchar
+      - name: is_cross_border
+        data_type: boolean
+      - name: status
+        data_type: varchar
+      - name: decline_reason
+        data_type: varchar
+      - name: customer_txn_count_1h
+        data_type: integer
+      - name: customer_amount_usd_24h
+        data_type: decimal(18,2)
+      - name: risk_score
+        data_type: integer
+        constraints: [{type: not_null}]
+      - name: risk_level
+        data_type: varchar
+      - name: risk_reasons
+        data_type: varchar
+      - name: is_risk_alert
+        data_type: boolean
+
+  - name: fct_chargebacks
+    description: One row per chargeback, attributed to the original transaction date (cohort view).
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: chargeback_id
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - name: transaction_id
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - name: merchant_id
+        data_type: varchar
+      - name: transaction_date
+        data_type: date
+      - name: reason_code
+        data_type: varchar
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [fraud, product_not_received, duplicate, not_as_described]
+      - name: is_fraud_reason
+        data_type: boolean
+      - name: amount
+        data_type: decimal(18,2)
+      - name: currency
+        data_type: varchar
+      - name: amount_usd
+        data_type: decimal(18,2)
+      - name: reported_at
+        data_type: timestamp
+      - name: days_to_report
+        data_type: integer
+
+  - name: dim_customers
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: customer_id
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - name: country
+        data_type: varchar
+      - name: signup_date
+        data_type: date
+      - name: kyc_level
+        data_type: varchar
+      - name: segment
+        data_type: varchar
+
+  - name: dim_merchants
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: merchant_id
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - name: merchant_name
+        data_type: varchar
+      - name: mcc_category
+        data_type: varchar
+      - name: country
+        data_type: varchar
+      - name: risk_tier
+        data_type: varchar
+
+  - name: mart_merchant_daily_kpis
+    description: >
+      Daily merchant scorecard for the risk and commercial teams: TPV, approval rate,
+      chargeback rate (card network monitoring programs flag merchants above ~0.9%) and alert volume.
+    config:
+      contract: {enforced: true}
+    data_tests:
+      - unique_combination:
+          arguments:
+            columns: [transaction_date, merchant_id]
+    columns:
+      - name: transaction_date
+        data_type: date
+        constraints: [{type: not_null}]
+      - name: merchant_id
+        data_type: varchar
+        constraints: [{type: not_null}]
+      - name: mcc_category
+        data_type: varchar
+      - name: merchant_risk_tier
+        data_type: varchar
+      - name: txn_count
+        data_type: integer
+      - name: approved_count
+        data_type: integer
+      - name: tpv_usd
+        data_type: decimal(18,2)
+      - name: approval_rate
+        data_type: double
+        data_tests:
+          - value_between:
+              arguments: {min_value: 0, max_value: 1}
+      - name: chargeback_count
+        data_type: integer
+      - name: chargeback_rate
+        data_type: double
+        data_tests:
+          - value_between:
+              arguments: {min_value: 0, max_value: 1}
+      - name: risk_alert_count
+        data_type: integer
+
+  - name: mart_fraud_alerts
+    description: Work queue for the fraud operations team, with ground truth from fraud chargebacks.
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: transaction_id
+        data_type: varchar
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - name: transaction_at
+        data_type: timestamp
+      - name: transaction_date
+        data_type: date
+      - name: customer_id
+        data_type: varchar
+      - name: merchant_id
+        data_type: varchar
+      - name: amount_usd
+        data_type: decimal(18,2)
+      - name: status
+        data_type: varchar
+      - name: risk_score
+        data_type: integer
+      - name: risk_level
+        data_type: varchar
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [medium, high]
+      - name: risk_reasons
+        data_type: varchar
+      - name: is_confirmed_fraud
+        data_type: boolean
+
+  - name: mart_risk_rule_performance
+    description: Daily precision and recall of the rule engine against fraud chargebacks.
+    config:
+      contract: {enforced: true}
+    columns:
+      - name: transaction_date
+        data_type: date
+        constraints: [{type: not_null}]
+        data_tests: [unique]
+      - name: approved_txn_count
+        data_type: integer
+      - name: alert_count
+        data_type: integer
+      - name: confirmed_fraud_count
+        data_type: integer
+      - name: true_positive_count
+        data_type: integer
+      - name: alert_precision
+        data_type: double
+        data_tests:
+          - value_between:
+              arguments: {min_value: 0, max_value: 1}
+      - name: fraud_recall
+        data_type: double
+        data_tests:
+          - value_between:
+              arguments: {min_value: 0, max_value: 1}
