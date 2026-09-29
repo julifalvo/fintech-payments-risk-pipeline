@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Lint & unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run pytest
+
+  data-pipeline:
+    name: Ingest + dbt build + Dagster defs
+    needs: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          enable-cache: true
+      - run: uv sync --frozen
+      - name: Land 7 days of synthetic data
+        run: uv run payments ingest --start 2026-09-01 --end 2026-09-07
+      - name: dbt build (models, data tests, unit tests, contracts)
+        working-directory: dbt
+        run: uv run dbt build --profiles-dir . --target-path target
+        env:
+          DUCKDB_PATH: ${{ github.workspace }}/data/warehouse/payments.duckdb
+          LANDING_DIR: ${{ github.workspace }}/data/landing
+      - name: Validate Dagster definitions
+        run: uv run dg check defs
+      - name: Upload dbt artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dbt-artifacts
+          path: |
+            dbt/target/manifest.json
+            dbt/target/run_results.json
+          retention-days: 7
+
+  docker:
+    name: Docker image build
+    needs: python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          push: false
+          tags: fintech-payments-risk-pipeline:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
