@@ -1,0 +1,13 @@
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+**/__pycache__
+data
+dbt/target
+dbt/logs
+logs
+.dagster_home
+.tmp_dagster_home_*
+.env
